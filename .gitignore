@@ -53,3 +53,74 @@ dkms.conf
 
 # debug information files
 *.dwo
+
+# =============================================================================
+# Photo-SLAM / Depth-Photo-SLAM Specific
+# =============================================================================
+
+# Result directories (experimental runs)
+results/
+results_*/
+test_gradient_conflict/
+results_debug/
+
+# Mesh outputs
+meshes/
+meshes_pa/
+
+# Comparison reports (generated)
+comparison_*.md
+
+# Log files
+*.log
+training_log.txt
+gradient_conflict_log.txt
+
+# Loss visualization outputs
+loss_viz/
+loss_viz_*/
+training_viz/
+training_viz_*/
+
+# Depth analysis outputs
+depth_comparison/
+depth_debug/
+depth_outlier_analysis/
+depth_edge_analysis.png
+
+# Build outputs
+build/
+bin/
+lib/
+
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+
+# Virtual environments
+venv/
+.venv/
+env/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Large files
+*.pdf
+*.ply
+*.pcd
+
+# Dataset directories (if any)
+datasets/
+data/
+
+# Temporary files
+*.tmp
+*.temp
+.cache/

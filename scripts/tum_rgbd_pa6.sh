@@ -1,0 +1,64 @@
+#!/bin/bash
+# PA6 Test: L_geo enabled (lambda_geo=0.2)
+# Purpose: Test balanced geometric depth loss - reduced from 1.0 to prevent PSNR degradation
+# Expected: Better PSNR than PA5 while maintaining L_geo benefits
+
+
+# Get the directory where the script is located and change to it
+SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
+cd "$SCRIPT_DIR"
+
+# Export OpenCV library path
+export LD_LIBRARY_PATH=/media/tam/DATA/3D/Photo-SLAM/third_party/opencv_install/lib:$LD_LIBRARY_PATH
+
+echo "running from: $(pwd)"
+echo "LD_LIBRARY_PATH set to include OpenCV 4.13"
+
+echo "=========================================="
+echo "TUM RGB-D Benchmark - PA6 (L_geo balanced)"
+echo "=========================================="
+echo "L_geo: lambda_geo = 0.2 (reduced from 1.0)"
+echo "L_align: DISABLED"
+echo "Iterations: 3 per dataset"
+echo "=========================================="
+echo ""
+
+for i in 0 1 2 3 4 5 6 7 8 9
+do
+echo "Iteration $i/2..."
+
+../bin/tum_rgbd \
+    ../ORB-SLAM3/Vocabulary/ORBvoc.txt \
+    ../cfg/ORB_SLAM3/RGB-D/TUM/tum_freiburg1_desk.yaml \
+    ../cfg/gaussian_mapper/RGB-D/TUM/tum_rgbd.yaml \
+    /media/tam/DATA/data/TUM/rgbd_dataset_freiburg1_desk \
+    ../cfg/ORB_SLAM3/RGB-D/TUM/associations/tum_freiburg1_desk.txt \
+    ../results_pa6/tum_rgbd_$i/rgbd_dataset_freiburg1_desk \
+    no_viewer
+
+../bin/tum_rgbd \
+    ../ORB-SLAM3/Vocabulary/ORBvoc.txt \
+    ../cfg/ORB_SLAM3/RGB-D/TUM/tum_freiburg2_xyz.yaml \
+    ../cfg/gaussian_mapper/RGB-D/TUM/tum_rgbd.yaml \
+    /media/tam/DATA/data/TUM/rgbd_dataset_freiburg2_xyz \
+    ../cfg/ORB_SLAM3/RGB-D/TUM/associations/tum_freiburg2_xyz.txt \
+    ../results_pa6/tum_rgbd_$i/rgbd_dataset_freiburg2_xyz \
+    no_viewer
+
+../bin/tum_rgbd \
+    ../ORB-SLAM3/Vocabulary/ORBvoc.txt \
+    ../cfg/ORB_SLAM3/RGB-D/TUM/tum_freiburg3_long_office_household.yaml \
+    ../cfg/gaussian_mapper/RGB-D/TUM/tum_rgbd.yaml \
+    /media/tam/DATA/data/TUM/rgbd_dataset_freiburg3_long_office_household \
+    ../cfg/ORB_SLAM3/RGB-D/TUM/associations/tum_freiburg3_long_office_household.txt \
+    ../results_pa6/tum_rgbd_$i/rgbd_dataset_freiburg3_long_office_household \
+    no_viewer
+
+done
+
+echo ""
+echo "=========================================="
+echo "PA6 Test Complete! Results saved to results_pa6/"
+echo "=========================================="
+echo "Run evaluation: cd Photo-SLAM-eval && python onekey.py -d /media/tam/DATA/data -r ../results_pa6/"
+echo "=========================================="
