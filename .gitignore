@@ -124,3 +124,4 @@ data/
 *.tmp
 *.temp
 .cache/
+eval_results_*/
