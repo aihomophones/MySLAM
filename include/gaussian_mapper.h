@@ -215,6 +215,9 @@ protected:
         std::string name_suffix = "");
     void renderAndRecordAllKeyframes(
         std::string name_suffix = "");
+    void renderAndRecordAllTrajectoryPoses(
+        std::filesystem::path trajectory_file,
+        std::string name_suffix = "");
 
     void savePly(std::filesystem::path result_dir);
     void keyframesToJson(std::filesystem::path result_dir);
@@ -286,6 +289,7 @@ protected:
     cv::Ptr<cv::cuda::StereoSGM> stereo_cv_sgm_;
     float RGBD_min_depth_ = 0.0f;
     float RGBD_max_depth_ = 100.0f;
+    float depth_save_scale_ = 5000.0f;  // TUM=5000, Replica=6553.5
 
     bool inactive_geo_densify_ = true;
     int depth_cached_ = 0;

@@ -266,6 +266,11 @@ void GaussianMapper::readConfigFromFile(std::filesystem::path cfg_path)
         settings_file["RGBD.min_depth"].operator float();
     RGBD_max_depth_ =
         settings_file["RGBD.max_depth"].operator float();
+    // Depth save scale: TUM=5000, Replica=6553.5
+    if (settings_file["RGBD.depth_save_scale"].isReal())
+        depth_save_scale_ = settings_file["RGBD.depth_save_scale"].operator float();
+    else
+        depth_save_scale_ = 5000.0f;  // Default: TUM format
 
     inactive_geo_densify_ =
         (settings_file["Mapper.inactive_geo_densify"].operator int()) != 0;
@@ -535,6 +540,11 @@ void GaussianMapper::run()
 
     // Save and clear
     renderAndRecordAllKeyframes("_shutdown");
+    // Render depth for all trajectory poses (not just keyframes)
+    std::filesystem::path traj_file = result_dir_ / "CameraTrajectory_TUM.txt";
+    if (std::filesystem::exists(traj_file)) {
+        renderAndRecordAllTrajectoryPoses(traj_file, "_shutdown");
+    }
     savePly(result_dir_ / (std::to_string(getIteration()) + "_shutdown") / "ply");
     writeKeyframeUsedTimes(result_dir_ / "used_times", "final");
 
@@ -1805,9 +1815,9 @@ void GaussianMapper::recordKeyframeRendered(
         torch::Tensor depth_squeezed = rendered_depth.squeeze().cpu();
         auto depth_cv = tensor_utils::torchTensor2CvMat_Float32(depth_squeezed);
         
-        // Save as 16-bit PNG (TUM format: depth * 5000)
+        // Save as 16-bit PNG with configurable scale (TUM=5000, Replica=6553.5)
         cv::Mat depth_16u;
-        depth_cv.convertTo(depth_16u, CV_16U, 5000.0f);
+        depth_cv.convertTo(depth_16u, CV_16U, depth_save_scale_);
         cv::imwrite(result_depth_dir / (std::to_string(getIteration()) + "_" + std::to_string(kfid) + name_suffix + "_depth.png"), depth_16u);
         
         // Save visualization with colormap
@@ -1963,6 +1973,95 @@ void GaussianMapper::renderAndRecordAllKeyframes(
 
         ++kfit;
     }
+}
+
+void GaussianMapper::renderAndRecordAllTrajectoryPoses(
+    std::filesystem::path trajectory_file,
+    std::string name_suffix)
+{
+    // Read TUM trajectory file
+    std::ifstream traj_file(trajectory_file);
+    if (!traj_file.is_open()) {
+        std::cerr << "[GaussianMapper] Cannot open trajectory file: " << trajectory_file << std::endl;
+        return;
+    }
+
+    std::vector<std::tuple<unsigned long, Eigen::Quaterniond, Eigen::Vector3d>> poses;
+    std::string line;
+    while (std::getline(traj_file, line)) {
+        if (line.empty() || line[0] == '#') continue;
+        std::istringstream iss(line);
+        double timestamp, tx, ty, tz, qx, qy, qz, qw;
+        if (!(iss >> timestamp >> tx >> ty >> tz >> qx >> qy >> qz >> qw)) continue;
+        unsigned long fid = static_cast<unsigned long>(timestamp);
+        Eigen::Quaterniond q(qw, qx, qy, qz);
+        Eigen::Vector3d t(tx, ty, tz);
+        poses.emplace_back(fid, q, t);
+    }
+    traj_file.close();
+
+    if (poses.empty()) {
+        std::cerr << "[GaussianMapper] No poses found in trajectory file" << std::endl;
+        return;
+    }
+
+    std::cout << "[GaussianMapper] Rendering depth for " << poses.size() << " trajectory poses..." << std::endl;
+
+    // Create output directories
+    std::filesystem::path result_dir = result_dir_ / (std::to_string(getIteration()) + name_suffix);
+    CHECK_DIRECTORY_AND_CREATE_IF_NOT_EXISTS(result_dir)
+
+    std::filesystem::path depth_dir = result_dir / "all_depths";
+    CHECK_DIRECTORY_AND_CREATE_IF_NOT_EXISTS(depth_dir)
+
+    // Get camera from first keyframe
+    if (scene_->keyframes().empty()) {
+        std::cerr << "[GaussianMapper] No keyframes available for camera params" << std::endl;
+        return;
+    }
+    auto first_kf = scene_->keyframes().begin()->second;
+
+    // Render depth for each pose
+    int progress = 0;
+    for (const auto& [fid, q, t] : poses) {
+        // Create temporary keyframe-like object for rendering
+        auto temp_kf = std::make_shared<GaussianKeyframe>();
+        temp_kf->fid_ = fid;
+        temp_kf->zfar_ = z_far_;
+        temp_kf->znear_ = z_near_;
+        temp_kf->setPose(q, t);
+        temp_kf->setCameraParams(scene_->cameras_.at(first_kf->camera_id_));
+        temp_kf->computeTransformTensors();
+
+        // Render
+        auto render_pkg = GaussianRenderer::render(
+            temp_kf,
+            temp_kf->image_height_,
+            temp_kf->image_width_,
+            gaussians_,
+            pipe_params_,
+            background_,
+            override_color_
+        );
+        auto rendered_depth = std::get<4>(render_pkg);
+
+        // Save depth
+        if (rendered_depth.defined() && rendered_depth.numel() > 0) {
+            torch::Tensor depth_squeezed = rendered_depth.squeeze().cpu();
+            auto depth_cv = tensor_utils::torchTensor2CvMat_Float32(depth_squeezed);
+            cv::Mat depth_16u;
+            depth_cv.convertTo(depth_16u, CV_16U, depth_save_scale_);
+            std::string filename = std::to_string(fid) + "_depth.png";
+            cv::imwrite(depth_dir / filename, depth_16u);
+        }
+
+        progress++;
+        if (progress % 100 == 0) {
+            std::cout << "[GaussianMapper] Rendered " << progress << "/" << poses.size() << " frames" << std::endl;
+        }
+    }
+
+    std::cout << "[GaussianMapper] Finished rendering all " << poses.size() << " trajectory poses" << std::endl;
 }
 
 void GaussianMapper::savePly(std::filesystem::path result_dir)
