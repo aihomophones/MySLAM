@@ -10,6 +10,30 @@ import open3d as o3d
 from PIL import Image
 import argparse
 from pathlib import Path
+from scipy.spatial.transform import Rotation as R
+
+def load_tum_trajectory(file_path):
+    """Load trajectory in TUM format: timestamp tx ty tz qx qy qz qw"""
+    poses = {}
+    with open(file_path, 'r') as f:
+        for line in f:
+            if line.startswith('#') or not line.strip():
+                continue
+            parts = line.strip().split()
+            if len(parts) >= 8:
+                timestamp = float(parts[0])
+                # TUM format: tx ty tz qx qy qz qw
+                t = np.array([float(x) for x in parts[1:4]])
+                q = np.array([float(x) for x in parts[4:8]]) # qx qy qz qw
+                
+                rot = R.from_quat(q).as_matrix()
+                pose = np.eye(4)
+                pose[:3, :3] = rot
+                pose[:3, 3] = t
+                
+                poses[int(timestamp)] = pose # Store by integer timestamp for easier matching
+                poses[timestamp] = pose      # Store by float too just in case
+    return poses
 
 
 def depth_to_pointcloud(depth_img, intrinsics, pose=None):
@@ -97,6 +121,7 @@ def main():
     parser.add_argument('--output_dir', type=str, required=True, help='Output directory')
     parser.add_argument('--depth_scale', type=float, default=6553.5, help='Depth scale')
     parser.add_argument('--gt_frame_id', type=int, default=None, help='GT Frame ID if different from frame_id')
+    parser.add_argument('--est_traj', type=str, default=None, help='Estimated trajectory file (TUM format) for rendered mesh')
     args = parser.parse_args()
     
     # Replica camera intrinsics
@@ -119,8 +144,30 @@ def main():
     
     pose = gt_poses.get(gt_fid)
     if pose is None:
-        print(f"Pose for frame {gt_fid} not found!")
-        return
+        print(f"Pose for frame {gt_fid} not found! Skipping GT mesh generation if needed.")
+        # We might still want to proceed if we have est_traj, but let's keep it safe
+        # If pose is None, we can't do GT mesh, so maybe just set pose to Identity or handle gracefully
+        # But for now let's assume valid GT pose is needed for comparison base.
+        # Actually, let's just create Identity so code doesn't crash if we only want Rendered Mesh
+        # But wait, we need GT pose for GT mesh. Let's Return if strictly comparing.
+        if not args.est_traj:
+             print("GT pose not found and no Est Trace provided. Exiting.")
+             return
+
+    # Load rendered mesh pose (Estimated Pose if provided, else GT Pose)
+    render_pose = pose # Default to GT pose
+    
+    if args.est_traj and Path(args.est_traj).exists():
+        print(f"Loading Estimated Trajectory from {args.est_traj}")
+        est_poses = load_tum_trajectory(args.est_traj)
+        
+        # Try to find corresponding pose. 
+        # Strategy: Use gt_fid (which is typically the timestamp)
+        if gt_fid in est_poses:
+            render_pose = est_poses[gt_fid]
+            print(f"Using Estimated Pose for Frame {args.frame_id} (Timestamp {gt_fid})")
+        else:
+            print(f"Warning: Timestamp {gt_fid} not found in estimated trajectory! Falling back to GT pose.")
     
     # Load rendered depth
     # Load rendered depth - Prioritize 'depth' folder (original keyframes)
@@ -160,8 +207,8 @@ def main():
     if render_depth_path and render_depth_path.exists():
         print(f"Loading rendered depth: {render_depth_path}")
         render_depth = np.array(Image.open(render_depth_path)).astype(np.float32) / args.depth_scale
-        render_points, render_depths = depth_to_pointcloud(render_depth, intrinsics, pose)
-        create_mesh_from_points(render_points, output_dir / f"frame{args.frame_id}_rendered.ply", render_depths, camera_center=pose[:3, 3])
+        render_points, render_depths = depth_to_pointcloud(render_depth, intrinsics, render_pose)
+        create_mesh_from_points(render_points, output_dir / f"frame{args.frame_id}_rendered.ply", render_depths, camera_center=render_pose[:3, 3])
     else:
         print(f"Rendered depth not found for frame {args.frame_id}")
     

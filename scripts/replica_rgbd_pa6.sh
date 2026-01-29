@@ -1,10 +1,10 @@
 #!/bin/bash
 
 # PA6 Replica Test Script - Run 3 times on all 8 scenes
-# Dataset path: /media/tam/DATA/data/Replica
+# Dataset path: /home/crl/lehieu/MyPhotoSLAM/data/Replica
 
-DATASET_DIR="/media/tam/DATA/data/Replica"
-RESULT_DIR="../results_replica_pa6_v2"
+DATASET_DIR="/home/crl/lehieu/MyPhotoSLAM/data/Replica"
+RESULT_DIR="../results_replica_pa6"
 
 cd "$(dirname "$0")"
 

@@ -31,6 +31,10 @@ def main():
     # Load Keyframe Trajectory mapping (Keyframe Index -> Timestamp)
     # File format: timestamp tx ty tz qx qy qz qw
     traj_file = result_dir / "KeyFrameTrajectory_TUM.txt"
+    if not traj_file.exists():
+        print(f"KeyFrameTrajectory_TUM.txt not found, checking CameraTrajectory_TUM.txt...")
+        traj_file = result_dir / "CameraTrajectory_TUM.txt"
+
     kf_mapping = {} # index -> timestamp
     if traj_file.exists():
         print(f"Loading Keyframe mapping from {traj_file}")
@@ -77,6 +81,7 @@ def main():
             '--result_dir', str(result_dir),
             '--gt_depth_dir', args.gt_depth_dir,
             '--gt_traj', args.gt_traj,
+            '--est_traj', str(traj_file),
             '--output_dir', f"{args.output_dir}/frame{fid}"
         ]
         
