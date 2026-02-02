@@ -350,6 +350,11 @@ void GaussianMapper::readConfigFromFile(std::filesystem::path cfg_path)
         settings_file["Optimization.percent_dense"].operator float();
     opt_params_.lambda_dssim_ =
         settings_file["Optimization.lambda_dssim"].operator float();
+    // Read lambda_geo from config, default to 0.0 if not present
+    if (!settings_file["Optimization.lambda_geo"].empty())
+        opt_params_.lambda_geo_ = settings_file["Optimization.lambda_geo"].operator float();
+    else
+        opt_params_.lambda_geo_ = 0.0f;
     opt_params_.densification_interval_ =
         settings_file["Optimization.densification_interval"].operator int();
     opt_params_.opacity_reset_interval_ =
@@ -792,7 +797,7 @@ void GaussianMapper::trainForOneIteration()
     
     // Combine losses with weights
     // PA8: Hybrid approach - L_geo + L_align for multi-view consistency
-    float lambda_geo = 0.5f;       // PA10: Higher
+    float lambda_geo = opt_params_.lambda_geo_;  // Read from config
     float lambda_align = 0.0f;     // PA10: DISABLED
     float lambda_var = 0.0f;
     float lambda_iso = 0.0f;

@@ -65,7 +65,8 @@ Optimization.rotation_lr: 0.001 #0.001
 
 # Densification
 Optimization.percent_dense: 0.01
-Optimization.lambda_dssim: 0.2
+Optimization.lambda_dssim: 0.125
+Optimization.lambda_geo: 0.8  # Geometric loss weight (L_geo from sensor depth)
 Optimization.densification_interval: 100
 Optimization.opacity_reset_interval: 0  # 0:never, 1:always, others:periodically
 Optimization.prune_big_point_after_iter: 30000
@@ -83,3 +84,9 @@ GaussianViewer.glfw_window_height: 1050
 GaussianViewer.image_scale: 0.5
 GaussianViewer.image_scale_main: 1.0
 GaussianViewer.camera_watch_dist: 0.000001
+
+Optimization.lambda_smooth: 0   # L_smooth: Edge-aware smoothness
+Optimization.lambda_var: 0.2       # L_var: Depth variance (uncertainty)
+Optimization.lambda_iso: 0.3       # L_iso: Gaussian isotropy (anti-needle)
+Optimization.lambda_align: 0.8    # L_align: Depth alpha-median alignment
+Optimization.gradient_log_interval: 100  # Debug: gradient conflict log every N iters (0=off, 100=recommended)
