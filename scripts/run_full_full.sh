@@ -36,9 +36,30 @@ GT_DATA_BASE="/home/crl/lehieu/MyPhotoSLAM/data/Replica"
 GT_MESH_BASE="/home/crl/lehieu/MyPhotoSLAM/data/Replica/cull_replica_mesh"
 # VENV_PATH="/media/tam/DATA/3D/Photo-SLAM/venv" # Unused in original script logic but kept if needed
 # TSDF_ENV_PATH="${BASE_DIR}/scripts/tsdf_env"   # Unused
-CONFIG_FILE="${BASE_DIR}/cfg/gaussian_mapper/RGB-D/Replica/replica_rgbd.yaml"
+CONFIG_FILE="${CONFIG_FILE:-${BASE_DIR}/cfg/gaussian_mapper/RGB-D/Replica/replica_rgbd.yaml}"
 
 cd "$BASE_DIR"
+
+# Activate conda environment (User requested slam_env)
+source ~/miniconda3/etc/profile.d/conda.sh
+if conda activate slam_env 2>/dev/null; then
+    echo ">> Activated conda environment: slam_env"
+elif conda activate photoslam 2>/dev/null; then
+    echo ">> Activated conda environment: photoslam"
+elif conda activate slam_env 2>/dev/null; then
+    echo ">> Activated conda environment: slam_env"
+else
+    echo ">> Warning: Could not activate 'slam_env', 'photo-slam', or 'photoslam'. Staying in current environment."
+fi
+
+# Capture the correct python executable
+if [ -n "$CONDA_PREFIX" ]; then
+    PYTHON_EXE="$CONDA_PREFIX/bin/python"
+    echo ">> Using Python from Conda: $PYTHON_EXE"
+else
+    PYTHON_EXE=$(which python)
+    echo ">> Using System Python: $PYTHON_EXE"
+fi
 
 # Extract loss weights from config
 LAMBDA_GEO=$(grep "Optimization.lambda_geo:" "$CONFIG_FILE" | awk '{print $2}')
@@ -68,7 +89,7 @@ mkdir -p "${BASE_DIR}/results_${PA_NAME}"
 
 # Only write header if CSV doesn't exist or is empty
 if [ ! -f "$SUMMARY_ALL" ] || [ ! -s "$SUMMARY_ALL" ]; then
-    echo "scene,run,psnr,ssim,lpips,accuracy,completion,comp_ratio,chamfer" > "$SUMMARY_ALL"
+    echo "scene,run,psnr,ssim,lpips,ate_rmse,accuracy,completion,comp_ratio,chamfer" > "$SUMMARY_ALL"
 fi
 echo "# Failed runs log - $(date)" >> "$FAILED_LOG"
 
@@ -85,11 +106,26 @@ run_single_scene() {
     echo "  Running: ${SCENE} (Run ${RUN}/${NUM_RUNS})"
     echo "======================================================"
     
-    # Delete existing results
+    # Check if run already finished successfully
+    if [ -f "${RESULT_DIR}/summary.txt" ]; then
+        # Check if the result is valid (PSNR should not be empty)
+        if grep -q "PSNR: $" "${RESULT_DIR}/summary.txt"; then
+            echo "[!] Found invalid summary (empty metrics). Re-running..."
+            rm -rf "$RESULT_DIR"
+        else
+            echo "[v] Run already completed successfully (summary.txt exists). Skipping..."
+            return 0
+        fi
+    fi
+
+    # Delete existing results (only if incomplete)
     if [ -d "$RESULT_DIR" ]; then
-        echo "[!] Deleting existing: $RESULT_DIR"
+        echo "[!] Deleting incomplete result: $RESULT_DIR"
         rm -rf "$RESULT_DIR"
     fi
+
+    # Create directory explicitly for log file
+    mkdir -p "$RESULT_DIR"
     
     # Step 1: Training
     echo "--- Training ---"
@@ -97,12 +133,22 @@ run_single_scene() {
     if ! ./bin/replica_rgbd \
         ORB-SLAM3/Vocabulary/ORBvoc.txt \
         cfg/ORB_SLAM3/RGB-D/Replica/${SCENE}.yaml \
-        cfg/gaussian_mapper/RGB-D/Replica/replica_rgbd.yaml \
+        "$CONFIG_FILE" \
         "${GT_DATA_DIR}" \
         "results_${PA_NAME}/${SCENE}_run${RUN}" \
-        no_viewer; then
-        echo "[X] TRAINING FAILED: ${SCENE} run ${RUN}"
+        no_viewer > "${RESULT_DIR}/run.log" 2>&1; then
+        echo "[X] TRAINING FAILED: ${SCENE} run ${RUN} (Exit Code: $?)"
+        tail -n 20 "${RESULT_DIR}/run.log"
         echo "${SCENE},${RUN},FAILED,training" >> "$FAILED_LOG"
+        echo "${SCENE},${RUN},FAILED,FAILED,FAILED,FAILED,FAILED,FAILED" >> "$SUMMARY_ALL"
+        return 1
+    fi
+
+    # Check if trajectory was saved (indicates successful completion)
+    if [ ! -f "${RESULT_DIR}/CameraTrajectory_TUM.txt" ]; then
+        echo "[X] TRAINING INCOMPLETE: CameraTrajectory_TUM.txt missing!"
+        tail -n 20 "${RESULT_DIR}/run.log"
+        echo "${SCENE},${RUN},FAILED,training_incomplete" >> "$FAILED_LOG"
         echo "${SCENE},${RUN},FAILED,FAILED,FAILED,FAILED,FAILED,FAILED" >> "$SUMMARY_ALL"
         return 1
     fi
@@ -110,13 +156,24 @@ run_single_scene() {
     # Step 2: Photometric Evaluation
     echo "--- Photometric Evaluation ---"
     cd "/home/crl/lehieu/Photo-SLAM-eval"
-    python run.py "/home/crl/lehieu/CG-photo/results_${PA_NAME}/${SCENE}_run${RUN}" "${GT_DATA_DIR}"
+    if ! "$PYTHON_EXE" run.py "/home/crl/lehieu/CG-photo/results_${PA_NAME}/${SCENE}_run${RUN}" "${GT_DATA_DIR}" >> "${RESULT_DIR}/run.log" 2>&1; then
+        echo "[X] PHOTOMETRIC EVAL FAILED"
+        echo "${SCENE},${RUN},FAILED,photometric_eval" >> "$FAILED_LOG"
+        return 1
+    fi
     
     # Calculate metrics
     PSNR=$(awk '{sum+=$1; count++} END {printf "%.4f", sum/count}' "${RESULT_DIR}/psnr.txt")
     SSIM=$(awk '{sum+=$1; count++} END {printf "%.4f", sum/count}' "${RESULT_DIR}/ssim.txt")
     LPIPS=$(awk '{sum+=$1; count++} END {printf "%.4f", sum/count}' "${RESULT_DIR}/lpips.txt")
     
+    # Extract ATE (RMSE) from metrics_traj.txt (first occurrence is Translation RMSE)
+    if [ -f "${RESULT_DIR}/metrics_traj.txt" ]; then
+        ATE_RMSE=$(grep "rmse" "${RESULT_DIR}/metrics_traj.txt" | head -n 1 | awk '{printf "%.4f", $2}')
+    else
+        ATE_RMSE="N/A"
+    fi
+
     # Step 3: Generate Mesh (using cameras.json for correct coordinate alignment)
     echo "--- Generating Mesh ---"
     cd "$BASE_DIR"
@@ -136,23 +193,32 @@ run_single_scene() {
     fi
     
     # Generate mesh using cameras.json with GT trajectory for coordinate alignment
-    python scripts/generate_mesh_from_json.py \
+    if ! "$PYTHON_EXE" scripts/generate_mesh_from_json.py \
         --json_path "$JSON_PATH" \
         --depth_dir "$DEPTH_DIR" \
         --output "${RESULT_DIR}/meshes/${SCENE}_json_aligned.ply" \
         --voxel_size 0.01 \
         --depth_scale 6553.5 \
         --max_depth 10.0 \
-        --gt_traj "$GT_TRAJ"
+        --gt_traj "$GT_TRAJ" >> "${RESULT_DIR}/run.log" 2>&1; then
+        echo "[X] MESH GENERATION FAILED"
+        echo "${SCENE},${RUN},FAILED,mesh_generation" >> "$FAILED_LOG"
+        return 1
+    fi
     MESH_FILE="${RESULT_DIR}/meshes/${SCENE}_json_aligned.ply"
     
     # Step 4: Geometric Evaluation
     echo "--- Geometric Evaluation ---"
     cd "${BASE_DIR}/neural_slam_eval-main"
-    EVAL_OUTPUT=$(python eval_recon.py \
+    if ! EVAL_OUTPUT=$("$PYTHON_EXE" eval_recon.py \
         --rec_mesh "$MESH_FILE" \
         --gt_mesh "${GT_MESH}" \
-        -3d 2>&1)
+        -3d 2>&1); then
+        echo "[X] GEOMETRIC EVAL FAILED"
+        echo "$EVAL_OUTPUT" >> "${RESULT_DIR}/run.log"
+        echo "${SCENE},${RUN},FAILED,geometric_eval" >> "$FAILED_LOG"
+        return 1
+    fi
     
     ACC=$(echo "$EVAL_OUTPUT" | grep "accuracy:" | awk '{printf "%.4f", $2}')
     COMP=$(echo "$EVAL_OUTPUT" | grep "completion:" | awk '{printf "%.4f", $2}')
@@ -162,11 +228,11 @@ run_single_scene() {
     # Print summary for this run
     echo ""
     echo "--- ${SCENE} Run ${RUN} Results ---"
-    echo "PSNR: ${PSNR} | SSIM: ${SSIM} | LPIPS: ${LPIPS}"
+    echo "PSNR: ${PSNR} | SSIM: ${SSIM} | LPIPS: ${LPIPS} | ATE: ${ATE_RMSE}"
     echo "Acc: ${ACC}cm | Comp: ${COMP}cm | Chamfer: ${CHAMFER}cm | Ratio: ${COMP_RATIO}%"
     
     # Append to CSV
-    echo "${SCENE},${RUN},${PSNR},${SSIM},${LPIPS},${ACC},${COMP},${COMP_RATIO},${CHAMFER}" >> "$SUMMARY_ALL"
+    echo "${SCENE},${RUN},${PSNR},${SSIM},${LPIPS},${ATE_RMSE},${ACC},${COMP},${COMP_RATIO},${CHAMFER}" >> "$SUMMARY_ALL"
     
     # Save individual summary
     cat > "${RESULT_DIR}/summary.txt" << EOF
@@ -183,6 +249,7 @@ lambda_align: ${LAMBDA_ALIGN}
 PSNR: ${PSNR}
 SSIM: ${SSIM}
 LPIPS: ${LPIPS}
+ATE_RMSE: ${ATE_RMSE}
 Accuracy: ${ACC}
 Completion: ${COMP}
 Completion_Ratio: ${COMP_RATIO}

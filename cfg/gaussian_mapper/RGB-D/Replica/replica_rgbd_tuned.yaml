@@ -84,9 +84,10 @@ GaussianViewer.image_scale: 0.5
 GaussianViewer.image_scale_main: 1.0
 GaussianViewer.camera_watch_dist: 0.000001
 
-Optimization.lambda_geo: 0.8  # Geometric loss weight (L_geo from sensor depth)
-Optimization.lambda_smooth: 0.0   # L_smooth: Edge-aware smoothness
-Optimization.lambda_var: 0.0       # L_var: Depth variance (uncertainty)
-Optimization.lambda_iso: 0.0       # L_iso: Gaussian isotropy (anti-needle)
-Optimization.lambda_align: 0.0    # L_align: Depth alpha-median alignment
-Optimization.gradient_log_interval: 0  # Debug: gradient conflict log every N iters (0=off, 100=recommended)
+# Tuned Lambda Weights
+Optimization.lambda_geo: 0.8
+Optimization.lambda_smooth: 0.0
+Optimization.lambda_var: 0.0
+Optimization.lambda_iso: 0.0
+Optimization.lambda_align: 0.0
+Optimization.gradient_log_interval: 0

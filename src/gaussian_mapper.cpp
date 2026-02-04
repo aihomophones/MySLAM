@@ -355,6 +355,24 @@ void GaussianMapper::readConfigFromFile(std::filesystem::path cfg_path)
         opt_params_.lambda_geo_ = settings_file["Optimization.lambda_geo"].operator float();
     else
         opt_params_.lambda_geo_ = 0.0f;
+
+    // Read lambda_align
+    if (!settings_file["Optimization.lambda_align"].empty())
+        opt_params_.lambda_align_ = settings_file["Optimization.lambda_align"].operator float();
+    else
+        opt_params_.lambda_align_ = 0.0f;
+
+    // Read lambda_var
+    if (!settings_file["Optimization.lambda_var"].empty())
+        opt_params_.lambda_var_ = settings_file["Optimization.lambda_var"].operator float();
+    else
+        opt_params_.lambda_var_ = 0.0f;
+
+    // Read lambda_iso
+    if (!settings_file["Optimization.lambda_iso"].empty())
+        opt_params_.lambda_iso_ = settings_file["Optimization.lambda_iso"].operator float();
+    else
+        opt_params_.lambda_iso_ = 0.0f;
     opt_params_.densification_interval_ =
         settings_file["Optimization.densification_interval"].operator int();
     opt_params_.opacity_reset_interval_ =
@@ -771,7 +789,7 @@ void GaussianMapper::trainForOneIteration()
     // Variance loss: encourage low variance (confident depth estimates)
     auto L_var = loss_utils::uncertainty_variance_loss(depth_variance);
     // Isotropy loss: penalize needle-like Gaussians (uses log scales internally)
-    // auto L_iso = loss_utils::isotropy_loss(gaussians_->scaling_, 1.5f, true);  // DISABLED for PA8
+    auto L_iso = loss_utils::isotropy_loss(gaussians_->scaling_, 1.5f, true);
     
     // Geometric sensor depth loss (L_geo): direct supervision from RGBD sensor
     torch::Tensor L_geo = torch::zeros(1, torch::TensorOptions().device(device_type_));
@@ -798,16 +816,16 @@ void GaussianMapper::trainForOneIteration()
     // Combine losses with weights
     // PA8: Hybrid approach - L_geo + L_align for multi-view consistency
     float lambda_geo = opt_params_.lambda_geo_;  // Read from config
-    float lambda_align = 0.0f;     // PA10: DISABLED
-    float lambda_var = 0.0f;
-    float lambda_iso = 0.0f;
+    float lambda_align = opt_params_.lambda_align_;
+    float lambda_var = opt_params_.lambda_var_;
+    float lambda_iso = opt_params_.lambda_iso_;
     
     auto loss = (1.0 - lambda_dssim) * Ll1
                 + lambda_dssim * (1.0 - loss_utils::ssim(masked_image, gt_image, device_type_))
                 + lambda_geo * L_geo         // Sensor depth loss
-                + lambda_align * L_align     // RE-ENABLED for PA8
-                + lambda_var * L_var;
-                // + lambda_iso * L_iso;     // DISABLED for PA8
+                + lambda_align * L_align
+                + lambda_var * L_var
+                + lambda_iso * L_iso;
     
     // ========================================================================
     // LOSS COMPONENT LOGGING - Log individual loss values for visualization
